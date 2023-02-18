@@ -186,6 +186,8 @@ eval (RemoteApp e1 e2) env = do
       case closure of
         Closure var body environ -> do
           (res,enclaveEnv') <- evalEnclave body ((var, v2):environ)
+          --XXX: do we ever mutate the enclaveEnv ? Ideally no
+          --XXX: So can we throw away enclaveEnv'? Things to see
           pure (res, env2)
         _ -> pure (Err ENotClosure, env2)
     _ -> pure (Err ENotRemClos, env2)
