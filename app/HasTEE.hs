@@ -35,15 +35,20 @@ data Exp = Lit Int
          | Var Name
          | Lam Name Exp
          | App Exp Exp
+         | Let Name Exp Exp
+         | Plus Exp Exp
 
          -- HasTEE operators
-         | Remote Exp
+         | Remote    Exp
+         | OnServer  Exp
+         | RemoteApp Exp Exp -- (<.>)
          deriving (Show)
 
 data Value = IntVal Int
-           | Closure Name Exp MachineEnv
+           | Closure Name Exp Env
            -- HasTEE values
            | RemoteClosure Name
+           | Dummy
 
            -- Error values
            | Err ErrState
@@ -51,10 +56,14 @@ data Value = IntVal Int
 
 data ErrState = ENotClosure
               | EVarNotFound
+              | ENotRemClos
+              | ENotIntLit
 
 instance Show ErrState where
   show ENotClosure  = "Closure not found"
   show EVarNotFound = "Variable not in environment"
+  show ENotRemClos  = "Remote Closure not found"
+  show ENotIntLit   = "Not an integer literal"
 
 type Env = [(Name, Value)]
 
@@ -67,40 +76,121 @@ type MachineState = (Value, MachineEnv)
 
 type VarName = Int
 
-interpret :: Exp -> Value
-interpret e = fst $ evalState (eval e initEnv) initVarName
-  where
-    initEnv = ([],[])
-    initVarName = 0
 
-genRemVar :: (MonadState VarName m) => m String
+data StateVar =
+  StateVar { varName  :: Int
+           , encState :: EnclaveEnv
+           }
+
+initStateVar :: EnclaveEnv -> StateVar
+initStateVar = StateVar 0
+
+
+interpret :: Exp -> Value
+interpret e =
+  let newEnclaveEnv = snd $
+                      evalState (evalEnclave e initEnclaveEnv)
+                      (initStateVar initEnclaveEnv)
+  in fst $ evalState (eval e initClientEnv) (initStateVar newEnclaveEnv)
+  where
+    initEnclaveEnv = []
+    initClientEnv  = []
+
+genRemVar :: (MonadState StateVar m) => m String
 genRemVar = do
-  n <- get
-  put (n + 1)
+  n <- gets varName
+  modify $ \s -> s {varName = 1 + n}
   pure ("RemVar" <> show n)
 
-eval :: (MonadState VarName m)
-     => Exp
-     -> MachineEnv -> m MachineState
-eval (Lit n) env   = pure (IntVal n, env)
-eval (Var x) env@(clenv, _) = pure (lookupVar x clenv, env)
+evalEnclave :: (MonadState StateVar m)
+            => Exp -> EnclaveEnv -> m (Value, EnclaveEnv)
+evalEnclave (Lit n) env = pure (IntVal n, env)
+evalEnclave (Var x) env = pure (lookupVar x env, env)
+evalEnclave (Lam x e) env =
+  pure (Closure x e env, env)
+evalEnclave (Let name e1 e2) env = do
+  (e1', env') <- evalEnclave e1 env
+  evalEnclave e2 ((name,e1'):env')
+evalEnclave (App e1 e2) env = do
+  (v1, env1) <- evalEnclave e1 env
+  (v2, env2) <- evalEnclave e2 env1
+  case v1 of
+    Closure x body ev ->
+      evalEnclave body ((x, v2):ev)
+    _ -> pure (Err ENotClosure, env2)
+evalEnclave (Plus e1 e2) env = do
+  (v1, env1) <- evalEnclave e1 env
+  (v2, env2) <- evalEnclave e2 env1
+  case v1 of
+    (IntVal a1) -> case v2 of
+                  (IntVal a2) -> pure (IntVal (a1 + a2), env2)
+                  _ -> pure (Err ENotIntLit, env2)
+    _ -> pure (Err ENotIntLit, env2)
+
+evalEnclave (Remote e) env = do
+  (val, env') <- evalEnclave e env
+  varname     <- genRemVar
+  let env'' = (varname, val):env'
+  pure (RemoteClosure varname, env'')
+-- the following two are the essentially no-ops
+evalEnclave (OnServer e) env = evalEnclave e env
+evalEnclave (RemoteApp e1 e2) env = do
+  (_, env1) <- evalEnclave e1 env
+  (_, env2) <- evalEnclave e2 env1
+  pure (Dummy, env2)
+
+
+eval :: (MonadState StateVar m)
+     => Exp -> ClientEnv -> m (Value, ClientEnv)
+eval (Lit n) env = pure (IntVal n, env)
+eval (Var x) env = pure (lookupVar x env, env)
 eval (Lam x e) env =
   pure (Closure x e env, env)
+eval (Let name e1 e2) env = do
+  (e1', env') <- eval e1 env
+  eval e2 ((name,e1'):env')
 eval (App e1 e2) env = do
   (v1, env1) <- eval e1 env
   (v2, env2) <- eval e2 env1
   case v1 of
-    Closure x body (cle, ence) ->
-      eval body (((x, v2) : cle), ence)
+    Closure x body ev ->
+      eval body ((x, v2):ev)
     _ -> pure (Err ENotClosure, env2)
+eval (Plus e1 e2) env = do
+  (v1, env1) <- eval e1 env
+  (v2, env2) <- eval e2 env1
+  case v1 of
+    (IntVal a1) -> case v2 of
+                  (IntVal a2) -> pure (IntVal (a1 + a2), env2)
+                  _ -> pure (Err ENotIntLit, env2)
+    _ -> pure (Err ENotIntLit, env2)
+
+
 eval (Remote e) env = do
-  (e', env1@(clenv, encenv)) <- eval e env
+  (_, env') <- eval e env
+  varname     <- genRemVar
+  let env'' = (varname, Dummy):env'
+  pure (RemoteClosure varname, env'')
+eval (OnServer e) env = do
+  (e', env1) <- eval e env
   case e' of
-    Closure _ _ _ -> do
-      varname <- genRemVar
-      let encenv' = (varname, e') : encenv
-      pure(RemoteClosure varname, (clenv, encenv'))
-    _ -> pure (Err ENotClosure, env1)
+    RemoteClosure varname -> pure (RemoteClosure varname, env1)
+    _ -> pure (Err ENotRemClos, env1)
+eval (RemoteApp e1 e2) env = do
+  (v1, env1) <- eval e1 env
+  (v2, env2) <- eval e2 env1
+  case v1 of
+    (RemoteClosure varname) -> do
+      enclaveEnv <- gets encState
+      let closure = lookupVar varname enclaveEnv
+      case closure of
+        Closure var body environ -> do
+          (res,enclaveEnv') <- evalEnclave body ((var, v2):environ)
+          pure (res, env2)
+        _ -> pure (Err ENotClosure, env2)
+    _ -> pure (Err ENotRemClos, env2)
+
+
 
 
 lookupVar :: String -> [(String, Value)] -> Value
