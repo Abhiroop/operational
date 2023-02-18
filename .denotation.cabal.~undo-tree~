@@ -1,8 +1,0 @@
-(undo-tree-save-format-version . 1)
-"cb4628c6b33e5880dcdeeca63fcbb20b41b0fadc"
-[nil nil nil nil (25584 62922 687623 437000) 0 nil]
-([nil nil ((2313 . 2318) (t 25583 52503 357888 225000)) nil (25584 62922 687617 558000) 0 nil])
-([nil nil ((#("denotation" 0 10 (fontified t face font-lock-comment-face)) . -487) (t 25584 62922 692607 938000) (497 . 508) (t 25584 62922 692607 938000)) nil (25584 64528 248391 138000) 0 nil])
-([nil nil ((#("denotation" 0 10 (fontified t)) . -656) (666 . 677)) nil (25584 64528 248389 400000) 0 nil])
-([nil current ((nil fontified t 1883 . 1893) (nil face font-lock-function-name-face 1883 . 1893) (#("denotation" 0 10 (fontified t face font-lock-function-name-face)) . -1882) (1892 . 1903)) nil (25584 64528 248382 535000) 0 nil])
-nil
