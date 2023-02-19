@@ -139,7 +139,7 @@ evalEnclave (Remote e) env = do
   (val, env') <- evalEnclave e env
   varname     <- genRemVar
   let env'' = (varname, val):env'
-  pure (RemoteClosure varname [], env'')
+  pure (Dummy, env'')
 -- the following two are the essentially no-ops
 evalEnclave (OnServer e) env = evalEnclave e env
 evalEnclave (RemoteApp e1 e2) env = do
