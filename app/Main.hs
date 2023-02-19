@@ -1,17 +1,17 @@
 module Main where
 
-import HasTEE
+import HasTEEOrig
 
 
 prog :: Exp
-prog = Lam "x" (Var "x")
+prog = Fun ["x"] (Var "x")
 
 prog1 :: Exp
 prog1 =
   Let "m" (Lit 3)
-  (Let "f" (Lam "x" (Plus (Var "x") (Var "m")))
+  (Let "f" (Fun ["x"] (Plus (Var "x") (Var "m")))
    (Let "y" (Remote (Var "f"))
-    (RemoteApp (OnServer (Var "y")) (Lit 2))))
+    (OnServer (RemoteApp (Var "y") (Lit 2)))))
 
 main :: IO ()
 main = print $ interpret prog1
