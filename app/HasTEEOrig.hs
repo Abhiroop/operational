@@ -3,7 +3,6 @@ module HasTEEOrig where
 
 import Control.Monad.State.Class
 import Control.Monad.State.Strict
-
 {-
 
 liftNewRef :: a -> App (Server (Ref a))
@@ -39,15 +38,15 @@ data Exp = Lit Int
          | Plus Exp Exp
 
          -- HasTEE operators
-         | Remote    Exp
-         | OnServer  Exp
-         | RemoteApp Exp Exp -- (<.>)
+         | Secure     Exp
+         | OnEnclave  Exp
+         | EnclaveApp Exp Exp -- (<.>)
          deriving (Show)
 
 data Value = IntVal Int
            | Closure [Name] Exp Env
            -- HasTEE values
-           | RemoteClosure Name [Value]
+           | SecureClosure Name [Value]
            | ArgList [Value]
            | Dummy
 
@@ -57,13 +56,13 @@ data Value = IntVal Int
 
 data ErrState = ENotClosure
               | EVarNotFound
-              | ENotRemClos
+              | ENotSecClos
               | ENotIntLit
 
 instance Show ErrState where
   show ENotClosure  = "Closure not found"
   show EVarNotFound = "Variable not in environment"
-  show ENotRemClos  = "Remote Closure not found"
+  show ENotSecClos  = "Secure Closure not found"
   show ENotIntLit   = "Not an integer literal"
 
 type Env = [(Name, Value)]
@@ -97,11 +96,11 @@ eval e =
     initEnclaveEnv = []
     initClientEnv  = []
 
-genRemVar :: (MonadState StateVar m) => m String
-genRemVar = do
+genEncVar :: (MonadState StateVar m) => m String
+genEncVar = do
   n <- gets varName
   modify $ \s -> s {varName = 1 + n}
-  pure ("RemVar" <> show n)
+  pure ("EncVar" <> show n)
 
 evalList :: (MonadState StateVar m) => [Exp] -> Env -> [Value] -> m ([Value], Env)
 evalList []      e vals = pure (reverse vals, e)
@@ -133,14 +132,14 @@ evalEnclave (Plus e1 e2) env = do
     (IntVal a1, IntVal a2) -> pure (IntVal (a1 + a2), env2)
     _ -> pure (Err ENotIntLit, env2)
 
-evalEnclave (Remote e) env = do
+evalEnclave (Secure e) env = do
   (val, env') <- evalEnclave e env
-  varname     <- genRemVar
+  varname     <- genEncVar
   let env'' = (varname, val):env'
   pure (Dummy, env'')
 -- the following two are the essentially no-ops
-evalEnclave (OnServer e) env = evalEnclave e env
-evalEnclave (RemoteApp e1 e2) env = do
+evalEnclave (OnEnclave e) env = evalEnclave e env
+evalEnclave (EnclaveApp e1 e2) env = do
   (_, env1) <- evalEnclave e1 env
   (_, env2) <- evalEnclave e2 env1
   pure (Dummy, env2)
@@ -176,37 +175,37 @@ evalClient (Plus e1 e2) env = do
     _ -> pure (Err ENotIntLit, env2)
 
 
-evalClient (Remote e) env = do
+evalClient (Secure e) env = do
   (_, env') <- evalClient e env
-  varname     <- genRemVar
+  varname     <- genEncVar
   let env'' = (varname, Dummy):env'
-  pure (RemoteClosure varname [], env'')
-evalClient (OnServer e) env = do
+  pure (SecureClosure varname [], env'')
+evalClient (OnEnclave e) env = do
   (e', env1) <- evalClient e env
   case e' of
-    RemoteClosure varname vals -> do
+    SecureClosure varname vals -> do
       enclaveEnv <- gets encState
       let func = lookupVar varname enclaveEnv
       case func of
-        Closure vars body environ -> do
-          (res,enclaveEnv') <- evalEnclave body ((zip vars vals) ++ environ)
+        Closure vars body encEnv -> do
+          (res,enclaveEnv') <- evalEnclave body ((zip vars vals) ++ encEnv)
           pure (res, env1)
         _ -> pure (Err ENotClosure, env1)
-    _ -> pure (Err ENotRemClos, env1)
-evalClient (RemoteApp e1 e2) env = do
+    _ -> pure (Err ENotSecClos, env1)
+evalClient (EnclaveApp e1 e2) env = do
   (v1, env1) <- evalClient e1 env
   (v2, env2) <- evalClient e2 env1
   case v1 of
-    RemoteClosure f args ->
+    SecureClosure f args ->
       case v2 of
-        ArgList vals -> pure (RemoteClosure f (args ++ vals), env2)
-        v -> pure (RemoteClosure f (args ++ [v]), env2)
+        ArgList vals -> pure (SecureClosure f (args ++ vals), env2)
+        v -> pure (SecureClosure f (args ++ [v]), env2)
     v -> pure (ArgList [v,v2], env2)
 
 
--- onServer (f == RemoteClosure f [])
--- onServer (f <.> arg == RA f arg == RemoteClosure f [arg])
--- onServer (f <.> arg1 <.> arg2 == RA f (RA arg1 arg2) == RC f [arg1, arg2])
+-- onServer (f == SecureClosure f [])
+-- onServer (f <.> arg == EA f arg == SecureClosure f [arg])
+-- onServer (f <.> arg1 <.> arg2 == EA f (EA arg1 arg2) == SC f [arg1, arg2])
 
 
 

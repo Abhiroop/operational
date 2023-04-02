@@ -10,8 +10,8 @@ prog1 :: Exp
 prog1 =
   Let "m" (Lit 3)
   (Let "f" (Fun ["x"] (Plus (Var "x") (Var "m")))
-   (Let "y" (Remote (Var "f"))
-    (OnServer (RemoteApp (Var "y") (Lit 2)))))
+   (Let "y" (Secure (Var "f"))
+    (OnEnclave (EnclaveApp (Var "y") (Lit 2)))))
 
 main :: IO ()
-main = print $ interpret prog1
+main = print $ eval prog1
