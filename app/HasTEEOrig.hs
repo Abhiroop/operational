@@ -38,8 +38,8 @@ data Exp = Lit Int
          | Plus Exp Exp
 
          -- HasTEE operators
-         | Secure     Exp
-         | OnEnclave  Exp
+         | InEnclave  Exp
+         | Gateway  Exp
          | EnclaveApp Exp Exp -- (<.>)
          deriving (Show)
 
@@ -132,13 +132,13 @@ evalEnclave (Plus e1 e2) env = do
     (IntVal a1, IntVal a2) -> pure (IntVal (a1 + a2), env2)
     _ -> pure (Err ENotIntLit, env2)
 
-evalEnclave (Secure e) env = do
+evalEnclave (InEnclave e) env = do
   (val, env') <- evalEnclave e env
   varname     <- genEncVar
   let env'' = (varname, val):env'
   pure (Dummy, env'')
 -- the following two are the essentially no-ops
-evalEnclave (OnEnclave e) env = evalEnclave e env
+evalEnclave (Gateway e) env = evalEnclave e env
 evalEnclave (EnclaveApp e1 e2) env = do
   (_, env1) <- evalEnclave e1 env
   (_, env2) <- evalEnclave e2 env1
@@ -175,12 +175,12 @@ evalClient (Plus e1 e2) env = do
     _ -> pure (Err ENotIntLit, env2)
 
 
-evalClient (Secure e) env = do
+evalClient (InEnclave e) env = do
   (_, env') <- evalClient e env
   varname     <- genEncVar
   let env'' = (varname, Dummy):env'
   pure (SecureClosure varname [], env'')
-evalClient (OnEnclave e) env = do
+evalClient (Gateway e) env = do
   (e', env1) <- evalClient e env
   case e' of
     SecureClosure varname vals -> do

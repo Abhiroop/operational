@@ -10,8 +10,8 @@ prog1 :: Exp
 prog1 =
   Let "m" (Lit 3)
   (Let "f" (Fun ["x"] (Plus (Var "x") (Var "m")))
-   (Let "y" (Secure (Var "f"))
-    (OnEnclave (EnclaveApp (Var "y") (Lit 2)))))
+   (Let "y" (InEnclave (Var "f"))
+    (Gateway (EnclaveApp (Var "y") (Lit 2)))))
 
 main :: IO ()
 main = print $ eval prog1
